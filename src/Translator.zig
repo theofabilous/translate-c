@@ -2201,6 +2201,7 @@ fn transExpr(t: *Translator, scope: *Scope, expr: Node.Index, used: ResultUsed) 
 
         .member_access_expr => |member_access| try t.transMemberAccess(scope, .normal, member_access, null),
         .member_access_ptr_expr => |member_access| try t.transMemberAccess(scope, .ptr, member_access, null),
+        // TODO: probably needs special case for volatile qual values
         .array_access_expr => |array_access| try t.transArrayAccess(scope, array_access, null),
 
         .builtin_ref => unreachable,
