@@ -2884,12 +2884,15 @@ fn transCommaExpr(t: *Translator, scope: *Scope, bin: Node.Binary, used: ResultU
 
 fn transAssignExpr(t: *Translator, scope: *Scope, bin: Node.Binary, used: ResultUsed) !ZigNode {
     if (used == .unused) {
-        const lhs = try t.transExpr(scope, bin.lhs, .used);
+        var lhs = try t.transExpr(scope, bin.lhs, .used);
         var rhs = try t.transExprCoercing(scope, bin.rhs, .used);
 
         const lhs_qt = bin.lhs.qt(t.tree);
         if (rhs.isBoolRes() and !lhs_qt.is(t.comp, .bool)) {
             rhs = try ZigTag.int_from_bool.create(t.arena, rhs);
+        }
+        if (lhs_qt.@"volatile") {
+            lhs = try t.volatileLvalToRval(lhs);
         }
 
         return t.createBinOpNode(.assign, lhs, rhs);
@@ -2945,7 +2948,11 @@ fn transCompoundAssign(
     const ref = try block_scope.reserveMangledName("ref");
 
     const lhs_expr = try t.transExpr(&block_scope.base, assign.lhs, .used);
-    const addr_of = try ZigTag.address_of.create(t.arena, lhs_expr);
+    const addr_of_pre = try ZigTag.address_of.create(t.arena, lhs_expr);
+    var addr_of = addr_of_pre;
+    if (assign.lhs.qt(t.tree).@"volatile") {
+        addr_of = try t.createHelperCallNode(.addVolatile, &.{ addr_of_pre });
+    }
     const ref_decl = try ZigTag.var_simple.create(t.arena, .{ .name = ref, .init = addr_of });
     try block_scope.statements.append(t.gpa, ref_decl);
 
@@ -3019,7 +3026,12 @@ fn transCompoundAssignSimple(t: *Translator, scope: *Scope, lhs_dummy_opt: ?ZigN
         defer t.compound_assign_dummy = old_dummy;
         t.compound_assign_dummy = lhs_dummy_opt orelse try t.transExpr(scope, assign.lhs, .used);
 
-        break :blk try t.transExpr(scope, bin.lhs, .used);
+        const lhs_node_pre = try t.transExpr(scope, bin.lhs, .used);
+        if (bin.lhs.qt(t.tree).@"volatile") {
+            break :blk try t.volatileLvalToRval(lhs_node_pre);
+        } else {
+            break :blk lhs_node_pre;
+        }
     };
 
     const rhs_node = try t.transExprCoercing(scope, bin.rhs, .used);
@@ -3031,6 +3043,7 @@ fn transCompoundAssignSimple(t: *Translator, scope: *Scope, lhs_dummy_opt: ?ZigN
     return try t.createBinOpNode(op, lhs_node, casted_rhs);
 }
 
+// TODO: handle volatile here?
 fn transIncDecExpr(
     t: *Translator,
     scope: *Scope,

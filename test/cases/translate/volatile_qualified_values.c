@@ -21,6 +21,8 @@ void foo() {
     x = v2;
     x += v2;
     v2 = 3u;
+    v2 += 1u;
+    unsigned int z = v2 += 1u;
     unsigned int y = *(&v1);
     int yy = hw.x;
 }
