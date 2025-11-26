@@ -2065,10 +2065,10 @@ fn transExpr(t: *Translator, scope: *Scope, expr: Node.Index, used: ResultUsed) 
         .cast => |cast| return t.transCastExpr(scope, cast, cast.qt, used, .with_as),
         .decl_ref_expr => |decl_ref| try t.transDeclRefExpr(scope, decl_ref),
         .enumeration_ref => |enum_ref| try t.transDeclRefExpr(scope, enum_ref),
-        // .addr_of_expr => |addr_of_expr| try ZigTag.address_of.create(t.arena, try t.transExpr(scope, addr_of_expr.operand, .used)),
         .addr_of_expr => |addr_of_expr| {
             const addr_of_node = try ZigTag.address_of.create(t.arena, try t.transExpr(scope, addr_of_expr.operand, .used));
             if (addr_of_expr.operand.qt(t.tree).@"volatile") {
+                std.debug.assert(qt.childType(t.comp).@"volatile");
                 // Need a pointer cast in case the operand is __helpers.Volatile(T), since
                 // we're casting to the raw pointer type (we want *volatile T, not *volatile Volatile(T))
                 const ptrcast_node = try ZigTag.ptr_cast.create(t.arena, addr_of_node);
@@ -2324,10 +2324,11 @@ fn transExprCoercing(t: *Translator, scope: *Scope, expr: Node.Index, used: Resu
                 return t.transExprCoercing(scope, cast.operand, used);
             },
             .lval_to_rval => {
+                const coerced_expr = try t.transExprCoercing(scope, cast.operand, used);
                 if (cast.operand.qt(t.tree).@"volatile") {
-                    return t.volatileLvalToRval(scope, cast.operand, used);
+                    return t.volatileLvalToRval(coerced_expr);
                 } else {
-                    return t.transExpr(scope, cast.operand, used);
+                    return coerced_expr;
                 }
             },
             else => return t.transCastExpr(scope, cast, cast.qt, used, .no_as),
@@ -2395,10 +2396,8 @@ fn finishBoolExpr(t: *Translator, qt: QualType, node: ZigNode) TransError!ZigNod
     unreachable; // Unexpected bool expression type
 }
 
-fn volatileLvalToRval(t: *Translator, scope: *Scope, operand: Node.Index, used: ResultUsed) TransError!ZigNode {
-    std.debug.assert(operand.qt(t.tree).@"volatile");
-    const sub_expr_node = try t.transExpr(scope, operand, used);
-    const ref = try ZigTag.address_of.create(t.arena, sub_expr_node);
+fn volatileLvalToRval(t: *Translator, operand_node: ast.Node) TransError!ZigNode {
+    const ref = try ZigTag.address_of.create(t.arena, operand_node);
     const volatile_ref = try t.createHelperCallNode(.addVolatile, &.{ ref });
     const deref = try ZigTag.deref.create(t.arena, volatile_ref);
     return deref;
@@ -2421,10 +2420,11 @@ fn transCastExpr(
             return t.transExpr(scope, cast.operand, used);
         },
         .lval_to_rval => {
+            const subexpr_node = try t.transExpr(scope, cast.operand, used);
             if (cast.operand.qt(t.tree).@"volatile") {
-                return t.volatileLvalToRval(scope, cast.operand, used);
+                return t.volatileLvalToRval(subexpr_node);
             } else {
-                return t.transExpr(scope, cast.operand, used);
+                return subexpr_node;
             }
         },
         .function_to_pointer => {
@@ -3156,7 +3156,12 @@ fn transMemberAccess(
         .parent = base_info.base(t.comp).qt,
         .field = field.qt,
     }).? else field.name.lookup(t.comp);
-    const base_node = opt_base orelse try t.transExpr(scope, member_access.base, .used);
+    const base_node_pre = opt_base orelse try t.transExpr(scope, member_access.base, .used);
+    const base_node = if (kind == .normal and base_info.@"volatile")
+        // t.volatileLvalToRval(scope, base_node_pre, .used)
+        try t.volatileLvalToRval(base_node_pre)
+    else
+        base_node_pre;
     const lhs = switch (kind) {
         .normal => base_node,
         .ptr => try ZigTag.deref.create(t.arena, base_node),
