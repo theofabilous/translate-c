@@ -1117,6 +1117,12 @@ fn getTypeStr(t: *Translator, qt: QualType) ![]const u8 {
 fn transType(t: *Translator, scope: *Scope, qt: QualType, source_loc: TokenIndex) TypeError!ZigNode {
     const inner_ty = try t.transTypeInner(scope, qt.unqualified(), source_loc);
     if (qt.@"volatile") {
+        switch (qt.type(t.comp)) {
+            .typedef => |typedef_ty| {
+                if (typedef_ty.base.@"volatile") return inner_ty;
+            },
+            else => {},
+        }
         return try t.createHelperCallNode(.Volatile, &.{ inner_ty });
     } else {
         return inner_ty;
@@ -2306,9 +2312,9 @@ fn transExprCoercing(t: *Translator, scope: *Scope, expr: Node.Index, used: Resu
             },
             .lval_to_rval => {
                 if (cast.operand.qt(t.tree).@"volatile") {
-                    return t.lvalToRval(scope, cast.operand, used);
+                    return t.volatileLvalToRval(scope, cast.operand, used);
                 } else {
-                    return t.transExprCoercing(scope, cast.operand, used);
+                    return t.transExpr(scope, cast.operand, used);
                 }
             },
             else => return t.transCastExpr(scope, cast, cast.qt, used, .no_as),
@@ -2376,16 +2382,13 @@ fn finishBoolExpr(t: *Translator, qt: QualType, node: ZigNode) TransError!ZigNod
     unreachable; // Unexpected bool expression type
 }
 
-fn lvalToRval(t: *Translator, scope: *Scope, operand: Node.Index, used: ResultUsed) TransError!ZigNode {
+fn volatileLvalToRval(t: *Translator, scope: *Scope, operand: Node.Index, used: ResultUsed) TransError!ZigNode {
+    std.debug.assert(operand.qt(t.tree).@"volatile");
     const sub_expr_node = try t.transExpr(scope, operand, used);
-    if (operand.qt(t.tree).@"volatile") {
-        const ref = try ZigTag.address_of.create(t.arena, sub_expr_node);
-        const volatile_ref = try t.createHelperCallNode(.addVolatile, &.{ ref });
-        const deref = try ZigTag.deref.create(t.arena, volatile_ref);
-        return deref;
-    } else {
-        return sub_expr_node;
-    }
+    const ref = try ZigTag.address_of.create(t.arena, sub_expr_node);
+    const volatile_ref = try t.createHelperCallNode(.addVolatile, &.{ ref });
+    const deref = try ZigTag.deref.create(t.arena, volatile_ref);
+    return deref;
 }
 
 fn transCastExpr(
@@ -2405,16 +2408,11 @@ fn transCastExpr(
             return t.transExpr(scope, cast.operand, used);
         },
         .lval_to_rval => {
-            return t.lvalToRval(scope, cast.operand, used);
-            // const sub_expr_node = try t.transExpr(scope, cast.operand, used);
-            // if (cast.operand.qt(t.tree).@"volatile") {
-            //     const ref = try ZigTag.address_of.create(t.arena, sub_expr_node);
-            //     const volatile_ref = try t.createHelperCallNode(.addVolatile, &.{ ref });
-            //     const deref = try ZigTag.deref.create(t.arena, volatile_ref);
-            //     return deref;
-            // } else {
-            //     return sub_expr_node;
-            // }
+            if (cast.operand.qt(t.tree).@"volatile") {
+                return t.volatileLvalToRval(scope, cast.operand, used);
+            } else {
+                return t.transExpr(scope, cast.operand, used);
+            }
         },
         .function_to_pointer => {
             return t.transExpr(scope, cast.operand, used);
