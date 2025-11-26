@@ -886,6 +886,10 @@ fn transVarDecl(t: *Translator, scope: *Scope, variable: Node.Variable) Error!vo
 
             if (!variable.qt.is(t.comp, .bool) and init_node.isBoolRes()) {
                 break :init try ZigTag.int_from_bool.create(t.arena, init_node);
+            } else if (variable.qt.@"volatile") {
+                const field_inits = try t.arena.alloc(ast.Payload.ContainerInitDot.Initializer, 1);
+                field_inits[0] = .{ .name = "value", .value = init_node };
+                break :init try ZigTag.container_init_dot.create(t.arena, field_inits);
             } else {
                 break :init init_node;
             }
@@ -3732,7 +3736,7 @@ fn transUnionInit(
         return try t.transExpr(scope, init_expr, used);
     }
 
-    const union_type = try t.transType(scope, union_init.union_qt, union_init.l_brace_tok);
+    const union_type = try t.transType(scope, union_init.union_qt.unqualified(), union_init.l_brace_tok);
 
     const union_base = union_init.union_qt.base(t.comp);
     const field = union_base.type.@"union".fields[union_init.field_index];
@@ -3760,7 +3764,7 @@ fn transStructInit(
     used: ResultUsed,
 ) TransError!ZigNode {
     assert(used == .used);
-    const struct_type = try t.transType(scope, struct_init.container_qt, struct_init.l_brace_tok);
+    const struct_type = try t.transType(scope, struct_init.container_qt.unqualified(), struct_init.l_brace_tok);
     const field_inits = try t.arena.alloc(ast.Payload.ContainerInit.Initializer, struct_init.items.len);
 
     const struct_base = struct_init.container_qt.base(t.comp);

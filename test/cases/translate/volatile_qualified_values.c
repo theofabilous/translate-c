@@ -7,7 +7,12 @@ struct hw {
     int x;
 };
 
+union uhw {
+    int x;
+};
+
 static volatile struct hw hw = {0};
+static volatile union uhw uhw = {0};
 
 void foo() {
     unsigned int x = v1;
