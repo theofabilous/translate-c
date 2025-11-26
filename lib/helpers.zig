@@ -80,9 +80,22 @@ fn ToUnsigned(comptime T: type) type {
     };
 }
 
+
+const unique_type = opaque {};
+
+inline fn isVolatileTypedef(comptime T: type) bool {
+    return comptime switch (@typeInfo(T)) {
+        .@"struct" => @hasDecl(T, "__volatile_id") and T.__volatile_id == unique_type,
+        else => false,
+    };
+}
+
 pub fn Volatile(comptime T: type) type {
     return extern struct {
         value: T = std.mem.zeroes(T),
+
+        pub const Type = T;
+        const __volatile_id = unique_type;
 
         pub fn load(self: *const @This()) T {
             return @as(*const volatile T, &self.value).*;
@@ -91,7 +104,6 @@ pub fn Volatile(comptime T: type) type {
         pub fn store(self: *@This(), value: T) void {
             @as(*volatile T, &self.value).* = value;
         }
-
     };
 }
 
@@ -172,13 +184,14 @@ pub fn signedRemainder(numerator: anytype, denominator: anytype) @TypeOf(numerat
 fn AddVolatile(comptime T: type) type {
     const ptr_info = @typeInfo(T).@"pointer";
     std.debug.assert(ptr_info.size == .one);
+    const child = if (isVolatileTypedef(ptr_info.child)) ptr_info.child.Type else ptr_info.child;
     return @Pointer(.one, .{
         .@"const" = ptr_info.is_const,
         .@"volatile" = true,
         .@"allowzero" = ptr_info.is_allowzero,
         .@"addrspace" = ptr_info.address_space,
         .@"align" = ptr_info.alignment,
-    }, ptr_info.child, null);
+    }, child, null);
 }
 
 /// Cast a single-item pointer to the same type with the addition
