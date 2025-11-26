@@ -230,6 +230,7 @@ fn translate(d: *aro.Driver, tc: *aro.Toolchain, args: [][:0]u8) !void {
     }
 
     var out_writer = out_file.writer(&out_buf);
+    // c_tree.dump(.detect(out_file), &out_writer.interface) catch @panic("foobar");
     out_writer.interface.writeAll(rendered_zig) catch {};
     out_writer.interface.flush() catch {};
     if (out_writer.err) |write_err|

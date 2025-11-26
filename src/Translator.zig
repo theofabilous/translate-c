@@ -1115,6 +1115,15 @@ fn getTypeStr(t: *Translator, qt: QualType) ![]const u8 {
 }
 
 fn transType(t: *Translator, scope: *Scope, qt: QualType, source_loc: TokenIndex) TypeError!ZigNode {
+    const inner_ty = try t.transTypeInner(scope, qt.unqualified(), source_loc);
+    if (qt.@"volatile") {
+        return try t.createHelperCallNode(.Volatile, &.{ inner_ty });
+    } else {
+        return inner_ty;
+    }
+}
+
+fn transTypeInner(t: *Translator, scope: *Scope, qt: QualType, source_loc: TokenIndex) TypeError!ZigNode {
     loop: switch (qt.type(t.comp)) {
         .atomic => {
             const type_name = try t.getTypeStr(qt);
@@ -1162,7 +1171,7 @@ fn transType(t: *Translator, scope: *Scope, qt: QualType, source_loc: TokenIndex
             const is_fn_proto = child_qt.is(t.comp, .func);
             const is_const = is_fn_proto or child_qt.@"const";
             const is_volatile = child_qt.@"volatile";
-            const elem_type = try t.transType(scope, child_qt, source_loc);
+            const elem_type = try t.transType(scope, child_qt.unqualified(), source_loc);
             const ptr_info: @FieldType(ast.Payload.Pointer, "data") = .{
                 .is_const = is_const,
                 .is_volatile = is_volatile,
@@ -1183,7 +1192,7 @@ fn transType(t: *Translator, scope: *Scope, qt: QualType, source_loc: TokenIndex
             const elem_qt = array_ty.elem;
             switch (array_ty.len) {
                 .incomplete, .unspecified_variable => {
-                    const elem_type = try t.transType(scope, elem_qt, source_loc);
+                    const elem_type = try t.transType(scope, elem_qt.unqualified(), source_loc);
                     return ZigTag.c_pointer.create(t.arena, .{
                         .is_const = elem_qt.@"const",
                         .is_volatile = elem_qt.@"volatile",
@@ -2295,7 +2304,13 @@ fn transExprCoercing(t: *Translator, scope: *Scope, expr: Node.Index, used: Resu
                 }
                 return t.transExprCoercing(scope, cast.operand, used);
             },
-            .lval_to_rval => return t.transExprCoercing(scope, cast.operand, used),
+            .lval_to_rval => {
+                if (cast.operand.qt(t.tree).@"volatile") {
+                    return t.lvalToRval(scope, cast.operand, used);
+                } else {
+                    return t.transExprCoercing(scope, cast.operand, used);
+                }
+            },
             else => return t.transCastExpr(scope, cast, cast.qt, used, .no_as),
         },
         .default_init_expr => |default_init| return try t.transDefaultInit(scope, default_init, used, .no_as),
@@ -2361,6 +2376,18 @@ fn finishBoolExpr(t: *Translator, qt: QualType, node: ZigNode) TransError!ZigNod
     unreachable; // Unexpected bool expression type
 }
 
+fn lvalToRval(t: *Translator, scope: *Scope, operand: Node.Index, used: ResultUsed) TransError!ZigNode {
+    const sub_expr_node = try t.transExpr(scope, operand, used);
+    if (operand.qt(t.tree).@"volatile") {
+        const ref = try ZigTag.address_of.create(t.arena, sub_expr_node);
+        const volatile_ref = try t.createHelperCallNode(.addVolatile, &.{ ref });
+        const deref = try ZigTag.deref.create(t.arena, volatile_ref);
+        return deref;
+    } else {
+        return sub_expr_node;
+    }
+}
+
 fn transCastExpr(
     t: *Translator,
     scope: *Scope,
@@ -2377,7 +2404,19 @@ fn transCastExpr(
             }
             return t.transExpr(scope, cast.operand, used);
         },
-        .lval_to_rval, .function_to_pointer => {
+        .lval_to_rval => {
+            return t.lvalToRval(scope, cast.operand, used);
+            // const sub_expr_node = try t.transExpr(scope, cast.operand, used);
+            // if (cast.operand.qt(t.tree).@"volatile") {
+            //     const ref = try ZigTag.address_of.create(t.arena, sub_expr_node);
+            //     const volatile_ref = try t.createHelperCallNode(.addVolatile, &.{ ref });
+            //     const deref = try ZigTag.deref.create(t.arena, volatile_ref);
+            //     return deref;
+            // } else {
+            //     return sub_expr_node;
+            // }
+        },
+        .function_to_pointer => {
             return t.transExpr(scope, cast.operand, used);
         },
         .int_cast => int_cast: {

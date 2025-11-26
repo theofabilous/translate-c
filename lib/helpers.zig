@@ -80,6 +80,21 @@ fn ToUnsigned(comptime T: type) type {
     };
 }
 
+pub fn Volatile(comptime T: type) type {
+    return extern struct {
+        value: T = std.mem.zeroes(T),
+
+        pub fn load(self: *const @This()) T {
+            return @as(*const volatile T, &self.value).*;
+        }
+
+        pub fn store(self: *@This(), value: T) void {
+            @as(*volatile T, &self.value).* = value;
+        }
+
+    };
+}
+
 /// Constructs a [*c] pointer with the const and volatile annotations
 /// from SelfType for pointing to a C flexible array of ElementType.
 pub fn FlexibleArrayType(comptime SelfType: type, comptime ElementType: type) type {
@@ -152,6 +167,24 @@ pub fn signedRemainder(numerator: anytype, denominator: anytype) @TypeOf(numerat
     std.debug.assert(@typeInfo(@TypeOf(numerator, denominator)).int.signedness == .signed);
     if (denominator > 0) return @rem(numerator, denominator);
     return numerator - @divTrunc(numerator, denominator) * denominator;
+}
+
+fn AddVolatile(comptime T: type) type {
+    const ptr_info = @typeInfo(T).@"pointer";
+    std.debug.assert(ptr_info.size == .one);
+    return @Pointer(.one, .{
+        .@"const" = ptr_info.is_const,
+        .@"volatile" = true,
+        .@"allowzero" = ptr_info.is_allowzero,
+        .@"addrspace" = ptr_info.address_space,
+        .@"align" = ptr_info.alignment,
+    }, ptr_info.child, null);
+}
+
+/// Cast a single-item pointer to the same type with the addition
+/// of volatile qualifier.
+pub inline fn addVolatile(ptr: anytype) AddVolatile(@TypeOf(ptr)) {
+    return @ptrCast(ptr);
 }
 
 /// Given a type and value, cast the value to the type as c would.
