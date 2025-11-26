@@ -14,6 +14,8 @@ union uhw {
 static volatile struct hw hw = {0};
 static volatile union uhw uhw = {0};
 
+extern void bar(vuint a, volatile unsigned int b);
+
 void foo() {
     unsigned int x = v1;
     x = v2;

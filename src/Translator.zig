@@ -1403,7 +1403,19 @@ fn transFnType(
         else
             param_info.name.lookup(t.comp);
 
-        const type_node = try t.transType(scope, param_qt, param_info.name_tok);
+        // Remove volatile qualifiers before calling transType() so that
+        // we don't end up with a __helpers.Volatile(T) func arg type, which
+        // could potentially cause an ABI change
+        var param_ty = param_qt;
+        while (param_ty.@"volatile") {
+            param_ty = switch (param_ty.type(t.comp)) {
+                .typedef => |typedef_ty| typedef_ty.base,
+                // TODO: attributed types..?
+                else => param_ty.unqualified(),
+            };
+        }
+
+        const type_node = try t.transType(scope, param_ty, param_info.name_tok);
         param_node.* = .{
             .is_noalias = is_noalias,
             .name = param_name,
