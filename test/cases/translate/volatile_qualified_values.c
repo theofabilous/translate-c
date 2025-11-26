@@ -6,6 +6,7 @@ static vuint v2 = 0u;
 void foo() {
     unsigned int x = v1;
     x = v2;
+    x += v2;
     v2 = 3u;
 }
 
