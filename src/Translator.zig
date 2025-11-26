@@ -2065,7 +2065,20 @@ fn transExpr(t: *Translator, scope: *Scope, expr: Node.Index, used: ResultUsed) 
         .cast => |cast| return t.transCastExpr(scope, cast, cast.qt, used, .with_as),
         .decl_ref_expr => |decl_ref| try t.transDeclRefExpr(scope, decl_ref),
         .enumeration_ref => |enum_ref| try t.transDeclRefExpr(scope, enum_ref),
-        .addr_of_expr => |addr_of_expr| try ZigTag.address_of.create(t.arena, try t.transExpr(scope, addr_of_expr.operand, .used)),
+        // .addr_of_expr => |addr_of_expr| try ZigTag.address_of.create(t.arena, try t.transExpr(scope, addr_of_expr.operand, .used)),
+        .addr_of_expr => |addr_of_expr| {
+            const addr_of_node = try ZigTag.address_of.create(t.arena, try t.transExpr(scope, addr_of_expr.operand, .used));
+            if (addr_of_expr.operand.qt(t.tree).@"volatile") {
+                // Need a pointer cast in case the operand is __helpers.Volatile(T), since
+                // we're casting to the raw pointer type (we want *volatile T, not *volatile Volatile(T))
+                const ptrcast_node = try ZigTag.ptr_cast.create(t.arena, addr_of_node);
+                return try ZigTag.as.create(t.arena, .{
+                    .lhs = try t.transType(scope, qt, addr_of_expr.op_tok),
+                    .rhs = ptrcast_node,
+                });
+            }
+            return addr_of_node;
+        },
         .deref_expr => |deref_expr| res: {
             if (t.typeWasDemotedToOpaque(qt))
                 return t.fail(error.UnsupportedTranslation, deref_expr.op_tok, "cannot dereference opaque type", .{});
@@ -2894,6 +2907,7 @@ fn transAssignExpr(t: *Translator, scope: *Scope, bin: Node.Binary, used: Result
     return try block_scope.complete();
 }
 
+// TODO: might need to handle the case where target is volatile qualified value
 fn transCompoundAssign(
     t: *Translator,
     scope: *Scope,

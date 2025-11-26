@@ -8,6 +8,7 @@ void foo() {
     x = v2;
     x += v2;
     v2 = 3u;
+    unsigned int y = *(&v1);
 }
 
 // translate
