@@ -27,6 +27,13 @@ void foo() {
     int yy = hw.x;
 }
 
+static vuint varr[3] = {0,0,0};
+
+void baz() {
+    unsigned int x = varr[2];
+    varr[2] = x;
+}
+
 // translate
 //
 // pub const vuint = __helpers.Volatile(c_uint);
